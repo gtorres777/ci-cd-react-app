@@ -5,28 +5,87 @@ on:
     branches:
       - "master"
 
+  pull_request:
+    branches:
+      - "master"
+    types:
+      - "opened"
+      - "synchronize"
+
 jobs:
-  build:
+
+  avoid_redundancy:
     runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Redundant Builds
+        uses: styfle/cancel-workflow-action@0.9.1
+        with:
+          access_token: ${{ github.token }}
 
-    strategy:
-      matrix:
-        node-version: [16.x]
-
+  apply_linter:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
       - name: Install dependencies
         run: npm ci
+      - name: Lint
+        run: npm run lint
 
+  building:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: npm ci
       - name: Build
         run: npm run build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: build
+          path: build
 
+  tests:
+    needs: [apply_linter, building]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: npm ci
+      - uses: actions/download-artifact@v3
+        with:
+          name: build
+          path: build
       - name: Test
         run: npm test
 
-      - name: Run Component tests 🧪
+  e2e_tests:
+    needs: [apply_linter, building]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: npm ci
+      - uses: actions/download-artifact@v3
+        with:
+          name: build
+          path: build
+      - name: Run E2E tests 
         uses: cypress-io/github-action@v2
         with:
           install: false
@@ -34,7 +93,14 @@ jobs:
           start: npm run start
           wait-on: http://localhost:3000/ci-cd-react-app
 
-      - name: Deploy
+  deploy:
+    needs: [tests, e2e_tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Deploy to Github Pages
+        if: {{ github.event_name == 'push' }}
         uses: JamesIves/github-pages-deploy-action@v4.3.3
         with:
           branch: gh-pages
